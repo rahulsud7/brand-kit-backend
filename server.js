@@ -11,14 +11,14 @@ app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
 /* =========================
-   OpenAI (UPGRADED MODEL)
+   OPENAI
 ========================= */
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
 /* =========================
-   Supabase
+   SUPABASE
 ========================= */
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -26,7 +26,7 @@ const supabase = createClient(
 );
 
 /* =========================
-   Health Check
+   HEALTH
 ========================= */
 app.get("/", (_req, res) => {
   res.send("Backend running 🚀");
@@ -39,17 +39,20 @@ app.post("/generate-brand-kit", async (req, res) => {
   try {
     const {
       brandName,
-      brandType,
       industry,
       audience,
       personality,
-      keywords,
+      values,
       competitors,
+      stylePreference,
+      logoDirection,
       userId
     } = req.body;
 
     if (!brandName || !userId) {
-      return res.status(400).json({ error: "Missing required fields" });
+      return res.status(400).json({
+        error: "brandName and userId are required"
+      });
     }
 
     /* ---------- Create Project ---------- */
@@ -68,68 +71,52 @@ app.post("/generate-brand-kit", async (req, res) => {
       .single();
 
     if (projectError) {
-      console.error("Project error:", projectError);
+      console.error(projectError);
       return res.status(500).json({ error: "Project creation failed" });
     }
 
     /* =========================
-       AI PROMPT (PRO LEVEL)
+       SYSTEM PROMPT (PRO LEVEL)
     ========================= */
 
     const systemPrompt = `
-You are a senior brand strategist, identity designer, and logo system architect.
-
-You think conceptually, not decoratively.
+You are a senior brand strategist and identity designer.
 
 You create:
-• Meaningful visual identities
-• Distinct symbolic SVG logos
-• Cohesive color systems
-• Strategic typography pairings
+- Concept-driven logos
+- Structured color systems
+- Intentional typography
+- Cohesive brand identity
 
-You NEVER output markdown.
-You NEVER explain outside JSON.
-You output ONLY valid JSON.
+RULES:
+- Output ONLY valid JSON
+- No markdown
+- No explanation text outside JSON
 
 LOGO RULES:
-- Logo MUST include a visual symbol + brand name
-- Symbol must reflect brand concept, not random geometry
-- Use only: <svg>, <text>, <rect>, <circle>, <line>, <path>
-- Single-line SVG
-- No gradients, no images
-- Balanced composition
-- Proper spacing
-- Scalable vector
+- Must include a symbolic icon + wordmark
+- Symbol must reflect brand positioning
+- Clean geometry
+- Modern minimal
 - Designed for dark background
-- Modern and minimal
+- Single line SVG
+- Use only <svg>, <text>, <rect>, <circle>, <line>, <path>
+- No gradients or images
 
-COLOR RULES:
-- Choose psychologically aligned palette
-- 1 primary
-- 1 secondary
-- 1 accent
-- 2 neutrals
-- Provide real hex values
-
-TYPOGRAPHY RULES:
-- Select real Google Fonts
-- One display/headline font
-- One readable body font
-- Avoid overused combinations
-
-All output must be cohesive and strategically aligned.
+Think like a real brand designer, not a template generator.
 `;
 
     const userPrompt = `
 Brand Name: ${brandName}
-Brand Type: ${brandType || "Not specified"}
 Industry: ${industry || "Not specified"}
-Target Audience: ${audience || "Not specified"}
-Brand Personality: ${personality || "Not specified"}
-Keywords: ${keywords || "None"}
-Competitors: ${competitors || "None"}
+Audience: ${audience || "Not specified"}
+Personality: ${personality || "Not specified"}
+Core Values: ${values || "Not specified"}
+Competitors: ${competitors || "Not specified"}
+Preferred Logo Style: ${stylePreference || "Not specified"}
+Visual Direction: ${logoDirection || "Not specified"}
 
-Generate a complete brand kit in EXACT JSON format:
+Generate this EXACT JSON structure:
 
 {
   "taglines": ["", "", ""],
@@ -139,11 +126,11 @@ Generate a complete brand kit in EXACT JSON format:
   "logo_description": "",
 
   "colors": [
-    {"role": "primary", "name": "", "hex": ""},
-    {"role": "secondary", "name": "", "hex": ""},
-    {"role": "accent", "name": "", "hex": ""},
-    {"role": "neutral", "name": "", "hex": ""},
-    {"role": "neutral", "name": "", "hex": ""}
+    {"role":"primary","name":"","hex":""},
+    {"role":"secondary","name":"","hex":""},
+    {"role":"accent","name":"","hex":""},
+    {"role":"neutral","name":"","hex":""},
+    {"role":"neutral","name":"","hex":""}
   ],
 
   "fonts": {
@@ -157,11 +144,10 @@ Generate a complete brand kit in EXACT JSON format:
 }
 
 IMPORTANT:
-- logo_svg must be single line
-- Use single quotes inside SVG attributes
-- Include meaningful symbol (not just brand text)
-- Symbol should visually represent brand positioning
-- Ensure professional balance
+- logo_svg must be ONE LINE
+- Use single quotes in SVG
+- Symbol must visually represent brand concept
+- Balanced layout
 `;
 
     const completion = await openai.chat.completions.create({
@@ -183,7 +169,7 @@ IMPORTANT:
       return res.status(500).json({ error: "AI JSON parse failed" });
     }
 
-    /* ---------- Save Brand Kit ---------- */
+    /* ---------- Save Kit ---------- */
     const { error: kitError } = await supabase
       .from("brand_kits")
       .insert([
@@ -194,11 +180,11 @@ IMPORTANT:
       ]);
 
     if (kitError) {
-      console.error("Kit save error:", kitError);
+      console.error(kitError);
       return res.status(500).json({ error: "Saving brand kit failed" });
     }
 
-    res.json({ result });
+    res.json(result);
 
   } catch (err) {
     console.error("SERVER ERROR:", err);
@@ -207,39 +193,8 @@ IMPORTANT:
 });
 
 /* =========================
-   DASHBOARD FETCH
-========================= */
-app.get("/my-kits/:userId", async (req, res) => {
-  try {
-    const { userId } = req.params;
-
-    const { data, error } = await supabase
-      .from("brand_projects")
-      .select(`
-        id,
-        brand_name,
-        created_at,
-        brand_kits ( result )
-      `)
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Fetch error:", error);
-      return res.status(500).json({ error: "Fetch failed" });
-    }
-
-    res.json(data);
-
-  } catch (err) {
-    console.error("Dashboard error:", err);
-    res.status(500).json({ error: "Dashboard error" });
-  }
-});
-
-/* =========================
    START SERVER
 ========================= */
-app.listen(process.env.PORT, () => {
-  console.log(`Server running on port ${process.env.PORT}`);
+app.listen(process.env.PORT || 5000, () => {
+  console.log("Server running");
 });
