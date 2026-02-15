@@ -25,9 +25,6 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-/* =========================
-   HEALTH
-========================= */
 app.get("/", (_req, res) => {
   res.send("Backend running 🚀");
 });
@@ -51,11 +48,11 @@ app.post("/generate-brand-kit", async (req, res) => {
 
     if (!brandName || !userId) {
       return res.status(400).json({
-        error: "brandName and userId are required"
+        error: "brandName and userId required"
       });
     }
 
-    /* ---------- Create Project ---------- */
+    /* ---------- Save Project ---------- */
     const { data: project, error: projectError } = await supabase
       .from("brand_projects")
       .insert([
@@ -76,47 +73,36 @@ app.post("/generate-brand-kit", async (req, res) => {
     }
 
     /* =========================
-       SYSTEM PROMPT (PRO LEVEL)
+       SYSTEM PROMPT
     ========================= */
 
     const systemPrompt = `
 You are a senior brand strategist and identity designer.
 
-You create:
-- Concept-driven logos
-- Structured color systems
-- Intentional typography
-- Cohesive brand identity
+Create a concept-driven brand identity.
 
 RULES:
 - Output ONLY valid JSON
 - No markdown
-- No explanation text outside JSON
-
-LOGO RULES:
-- Must include a symbolic icon + wordmark
-- Symbol must reflect brand positioning
-- Clean geometry
-- Modern minimal
+- No explanations outside JSON
+- Logo must include symbol + wordmark
+- Use clean minimal geometry
+- SVG must be single-line
 - Designed for dark background
-- Single line SVG
 - Use only <svg>, <text>, <rect>, <circle>, <line>, <path>
-- No gradients or images
-
-Think like a real brand designer, not a template generator.
 `;
 
     const userPrompt = `
 Brand Name: ${brandName}
-Industry: ${industry || "Not specified"}
-Audience: ${audience || "Not specified"}
-Personality: ${personality || "Not specified"}
-Core Values: ${values || "Not specified"}
-Competitors: ${competitors || "Not specified"}
-Preferred Logo Style: ${stylePreference || "Not specified"}
-Visual Direction: ${logoDirection || "Not specified"}
+Industry: ${industry}
+Audience: ${audience}
+Personality: ${personality}
+Core Values: ${values}
+Competitors: ${competitors}
+Logo Style: ${stylePreference}
+Visual Direction: ${logoDirection}
 
-Generate this EXACT JSON structure:
+Return:
 
 {
   "taglines": ["", "", ""],
@@ -142,12 +128,6 @@ Generate this EXACT JSON structure:
 
   "captions": ["", "", ""]
 }
-
-IMPORTANT:
-- logo_svg must be ONE LINE
-- Use single quotes in SVG
-- Symbol must visually represent brand concept
-- Balanced layout
 `;
 
     const completion = await openai.chat.completions.create({
@@ -170,19 +150,12 @@ IMPORTANT:
     }
 
     /* ---------- Save Kit ---------- */
-    const { error: kitError } = await supabase
-      .from("brand_kits")
-      .insert([
-        {
-          project_id: project.id,
-          result
-        }
-      ]);
-
-    if (kitError) {
-      console.error(kitError);
-      return res.status(500).json({ error: "Saving brand kit failed" });
-    }
+    await supabase.from("brand_kits").insert([
+      {
+        project_id: project.id,
+        result
+      }
+    ]);
 
     res.json(result);
 
@@ -192,9 +165,6 @@ IMPORTANT:
   }
 });
 
-/* =========================
-   START SERVER
-========================= */
 app.listen(process.env.PORT || 5000, () => {
   console.log("Server running");
 });
