@@ -37,13 +37,38 @@ app.get("/", (_req, res) => {
 });
 
 /* =========================
-   HELPER
+   HELPERS
 ========================= */
 
-function normalizeArray(value) {
+function normalize(value) {
   if (!value) return "";
   if (Array.isArray(value)) return value.join(", ");
   return value;
+}
+
+/* =========================
+   STYLE GUIDE
+========================= */
+
+function getStyleGuide(style) {
+  const map = {
+    Minimal:
+      "clean geometric shapes, flat minimal design, strong negative space",
+
+    Luxury:
+      "thin elegant lines, balanced symmetry, premium minimalist style",
+
+    Playful:
+      "rounded shapes, friendly geometry, bright accent colors",
+
+    Futuristic:
+      "tech inspired shapes, nodes, circuits, sharp modern angles",
+
+    Modern:
+      "balanced geometric icon with clean startup branding"
+  };
+
+  return map[style] || "modern geometric startup logo";
 }
 
 /* =========================
@@ -71,7 +96,9 @@ app.post("/generate-brand-kit", async (req, res) => {
       });
     }
 
-    const personalityText = normalizeArray(personality);
+    const personalityText = normalize(personality);
+    const valuesText = normalize(values);
+    const styleGuide = getStyleGuide(stylePreference);
 
     /* =========================
        SAVE PROJECT
@@ -92,7 +119,7 @@ app.post("/generate-brand-kit", async (req, res) => {
       .single();
 
     if (projectError) {
-      console.error("Project Error:", projectError);
+      console.error("Project creation failed:", projectError);
       return res.status(500).json({
         error: "Failed to create project"
       });
@@ -103,43 +130,64 @@ app.post("/generate-brand-kit", async (req, res) => {
     ========================= */
 
     const systemPrompt = `
-You are a senior brand strategist, identity designer, and creative director.
+You are a senior brand strategist and startup logo designer.
 
-Your task is to generate a professional brand identity system.
-
-STRICT RULES:
+Create a modern SaaS-style brand identity.
 
 Return ONLY valid JSON.
 
-Do NOT include markdown or explanations.
+Do not include explanations.
 
 LOGO DESIGN RULES:
 
-- Create a SYMBOL + WORDMARK logo
-- Use minimal geometric design
-- Avoid decorative complexity
-- Symbol must represent brand meaning
-- SVG must be clean and scalable
-- Designed primarily for dark backgrounds
+• Logo must include ICON + WORDMARK
+• Icon must appear LEFT of the text
+• Use minimal geometric shapes
+• Icon must visually represent the industry
+• Avoid decorative clutter
+• Use 1–2 colors maximum
 
-SVG RESTRICTIONS:
+ICON DESIGN EXAMPLES:
 
-Use ONLY these elements:
-<svg> <text> <rect> <circle> <line> <path>
+Technology → nodes, circuits, sparks
+Coffee → beans, steam, cup
+Finance → shield, upward arrow
+Fitness → pulse, motion lines
+Travel → compass, location pin
 
-SVG must be ONE LINE with no line breaks.
+LAYOUT STRUCTURE:
 
-COLORS:
+[ICON]  BrandName
 
-Provide a balanced palette suitable for modern digital brands.
+SPACING:
 
-FONTS:
+Icon center ≈ x:40 y:50
 
-Suggest widely available web-safe or Google Fonts.
+Text:
 
-SOCIAL CONTENT:
+x="80"
+y="58"
 
-Captions must sound natural and brand-aligned.
+SVG RULES:
+
+• width="260"
+• height="100"
+• viewBox="0 0 260 100"
+• single line SVG
+
+Allowed tags only:
+
+<svg> <circle> <rect> <path> <line> <text>
+
+Font family must be:
+
+Inter, Poppins, or sans-serif.
+
+Design inspiration:
+
+Stripe, Linear, Vercel, Notion.
+
+Output only JSON.
 `;
 
     /* =========================
@@ -151,30 +199,30 @@ Brand Name: ${brandName}
 
 Industry: ${industry}
 
-Target Audience: ${audience}
+Audience: ${audience}
 
 Brand Personality: ${personalityText}
 
-Core Values: ${values}
+Core Values: ${valuesText}
 
 Competitors: ${competitors}
 
-Design Style: ${stylePreference}
+Design Style: ${styleGuide}
 
-Logo Direction: ${logoDirection}
+Visual Direction: ${logoDirection}
 
-Create a complete brand kit.
+Generate a full brand kit.
 
-Return JSON in this EXACT structure:
+Return JSON exactly like this:
 
 {
   "taglines": ["", "", ""],
 
-  "logo_svg": "<svg width='260' height='100' viewBox='0 0 260 100' xmlns='http://www.w3.org/2000/svg'>...</svg>",
+  "logo_svg":"<svg width='260' height='100' viewBox='0 0 260 100' xmlns='http://www.w3.org/2000/svg'><circle cx='40' cy='50' r='16' fill='#6366F1'/><circle cx='52' cy='42' r='6' fill='#A5B4FC'/><text x='80' y='58' font-size='28' fill='#FFFFFF' font-family='Inter, sans-serif'>BrandName</text></svg>",
 
-  "logo_description": "",
+  "logo_description":"",
 
-  "colors": [
+  "colors":[
     {"role":"primary","name":"","hex":""},
     {"role":"secondary","name":"","hex":""},
     {"role":"accent","name":"","hex":""},
@@ -182,19 +230,19 @@ Return JSON in this EXACT structure:
     {"role":"neutral","name":"","hex":""}
   ],
 
-  "fonts": {
-    "heading": "",
-    "body": ""
+  "fonts":{
+    "heading":"",
+    "body":""
   },
 
-  "instagram_bio": "",
+  "instagram_bio":"",
 
-  "captions": ["", "", ""]
+  "captions":["","",""]
 }
 `;
 
     /* =========================
-       OPENAI REQUEST
+       OPENAI CALL
     ========================= */
 
     const completion = await openai.chat.completions.create({
@@ -226,7 +274,7 @@ Return JSON in this EXACT structure:
       ]);
 
     if (kitError) {
-      console.error("Kit Save Error:", kitError);
+      console.error("Kit save error:", kitError);
     }
 
     res.json(result);
@@ -237,6 +285,43 @@ Return JSON in this EXACT structure:
 
     res.status(500).json({
       error: "Brand kit generation failed"
+    });
+  }
+});
+
+/* =========================
+   GET USER BRAND KITS
+========================= */
+
+app.get("/my-kits/:userId", async (req, res) => {
+  try {
+
+    const { userId } = req.params;
+
+    const { data, error } = await supabase
+      .from("brand_projects")
+      .select(`
+        *,
+        brand_kits(*)
+      `)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      return res.status(500).json({
+        error: "Failed to fetch kits"
+      });
+    }
+
+    res.json(data);
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      error: "Server error"
     });
   }
 });
