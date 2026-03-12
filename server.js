@@ -7,12 +7,14 @@ import { createClient } from "@supabase/supabase-js";
 dotenv.config();
 
 const app = express();
+
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
 /* =========================
    OPENAI
 ========================= */
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
@@ -20,20 +22,37 @@ const openai = new OpenAI({
 /* =========================
    SUPABASE
 ========================= */
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 );
 
+/* =========================
+   HEALTH CHECK
+========================= */
+
 app.get("/", (_req, res) => {
-  res.send("Backend running 🚀");
+  res.send("AI Brand Kit Backend Running 🚀");
 });
+
+/* =========================
+   HELPER
+========================= */
+
+function normalizeArray(value) {
+  if (!value) return "";
+  if (Array.isArray(value)) return value.join(", ");
+  return value;
+}
 
 /* =========================
    GENERATE BRAND KIT
 ========================= */
+
 app.post("/generate-brand-kit", async (req, res) => {
   try {
+
     const {
       brandName,
       industry,
@@ -52,7 +71,12 @@ app.post("/generate-brand-kit", async (req, res) => {
       });
     }
 
-    /* ---------- Save Project ---------- */
+    const personalityText = normalizeArray(personality);
+
+    /* =========================
+       SAVE PROJECT
+    ========================= */
+
     const { data: project, error: projectError } = await supabase
       .from("brand_projects")
       .insert([
@@ -61,15 +85,17 @@ app.post("/generate-brand-kit", async (req, res) => {
           brand_name: brandName,
           industry,
           audience,
-          personality
+          personality: personalityText
         }
       ])
       .select()
       .single();
 
     if (projectError) {
-      console.error(projectError);
-      return res.status(500).json({ error: "Project creation failed" });
+      console.error("Project Error:", projectError);
+      return res.status(500).json({
+        error: "Failed to create project"
+      });
     }
 
     /* =========================
@@ -77,32 +103,69 @@ app.post("/generate-brand-kit", async (req, res) => {
     ========================= */
 
     const systemPrompt = `
-You are a senior brand strategist and identity designer.
+You are a senior brand strategist, identity designer, and creative director.
 
-Create a concept-driven brand identity.
+Your task is to generate a professional brand identity system.
 
-RULES:
-- Output ONLY valid JSON
-- No markdown
-- No explanations outside JSON
-- Logo must include symbol + wordmark
-- Use clean minimal geometry
-- SVG must be single-line
-- Designed for dark background
-- Use only <svg>, <text>, <rect>, <circle>, <line>, <path>
+STRICT RULES:
+
+Return ONLY valid JSON.
+
+Do NOT include markdown or explanations.
+
+LOGO DESIGN RULES:
+
+- Create a SYMBOL + WORDMARK logo
+- Use minimal geometric design
+- Avoid decorative complexity
+- Symbol must represent brand meaning
+- SVG must be clean and scalable
+- Designed primarily for dark backgrounds
+
+SVG RESTRICTIONS:
+
+Use ONLY these elements:
+<svg> <text> <rect> <circle> <line> <path>
+
+SVG must be ONE LINE with no line breaks.
+
+COLORS:
+
+Provide a balanced palette suitable for modern digital brands.
+
+FONTS:
+
+Suggest widely available web-safe or Google Fonts.
+
+SOCIAL CONTENT:
+
+Captions must sound natural and brand-aligned.
 `;
+
+    /* =========================
+       USER PROMPT
+    ========================= */
 
     const userPrompt = `
 Brand Name: ${brandName}
-Industry: ${industry}
-Audience: ${audience}
-Personality: ${personality}
-Core Values: ${values}
-Competitors: ${competitors}
-Logo Style: ${stylePreference}
-Visual Direction: ${logoDirection}
 
-Return:
+Industry: ${industry}
+
+Target Audience: ${audience}
+
+Brand Personality: ${personalityText}
+
+Core Values: ${values}
+
+Competitors: ${competitors}
+
+Design Style: ${stylePreference}
+
+Logo Direction: ${logoDirection}
+
+Create a complete brand kit.
+
+Return JSON in this EXACT structure:
 
 {
   "taglines": ["", "", ""],
@@ -130,41 +193,60 @@ Return:
 }
 `;
 
+    /* =========================
+       OPENAI REQUEST
+    ========================= */
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
       temperature: 0.7,
       max_tokens: 1200,
+      response_format: { type: "json_object" },
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
       ]
     });
 
-    let result;
+    const result = JSON.parse(
+      completion.choices[0].message.content
+    );
 
-    try {
-      result = JSON.parse(completion.choices[0].message.content);
-    } catch (err) {
-      console.error("AI RAW OUTPUT:", completion.choices[0].message.content);
-      return res.status(500).json({ error: "AI JSON parse failed" });
+    /* =========================
+       SAVE BRAND KIT
+    ========================= */
+
+    const { error: kitError } = await supabase
+      .from("brand_kits")
+      .insert([
+        {
+          project_id: project.id,
+          result
+        }
+      ]);
+
+    if (kitError) {
+      console.error("Kit Save Error:", kitError);
     }
-
-    /* ---------- Save Kit ---------- */
-    await supabase.from("brand_kits").insert([
-      {
-        project_id: project.id,
-        result
-      }
-    ]);
 
     res.json(result);
 
   } catch (err) {
+
     console.error("SERVER ERROR:", err);
-    res.status(500).json({ error: "Internal server error" });
+
+    res.status(500).json({
+      error: "Brand kit generation failed"
+    });
   }
 });
 
-app.listen(process.env.PORT || 5000, () => {
-  console.log("Server running");
+/* =========================
+   START SERVER
+========================= */
+
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+  console.log("Server running on port", PORT);
 });
